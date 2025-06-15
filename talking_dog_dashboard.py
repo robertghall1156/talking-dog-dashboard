@@ -9,7 +9,7 @@ Educational Demo Platform for Black Swan Detection
 🧠 AI-powered context validation and confidence scoring
 📈 Demo trading simulation for educational purposes
 
-Author: Trading Team
+Author: Robert H.
 Version: 1.1 - Fixed Decimal Strikes & Enhanced Forex
 """
 
@@ -197,9 +197,9 @@ class DemoSignalGenerator:
         if weekday == 5:  # Saturday
             return {
                 'has_scheduled_events': True,
-                'events': ['Veterans Military Parade in Washington DC'],
+                'events': ['Large Events in D.C.'],
                 'black_swan_probability': 0.15,
-                'explanation': 'High activity likely due to scheduled military parade'
+                'explanation': 'High activity likely due to scheduled event'
             }
         elif np.random.random() < 0.2:  # 20% chance of breaking news
             return {
@@ -281,7 +281,7 @@ class DemoSignalGenerator:
             return self.simulate_options_prep(signal, ticker, market_status)
     
     def simulate_options_trade(self, signal: Dict, ticker: str, market_status: Dict) -> Dict:
-        """Simulate options trade when options market is open - FIXED DECIMAL STRIKES"""
+        """Simulate options trade when options market is open"""
         current_price = 500 + np.random.uniform(-10, 10)  # Simulate SPY price
         
         # Choose strike based on signal strength
@@ -332,7 +332,7 @@ class DemoSignalGenerator:
         return trade
     
     def simulate_forex_trade(self, signal: Dict, market_status: Dict) -> Dict:
-        """Simulate forex trade when forex market is open - ENHANCED"""
+        """Simulate forex trade when forex market is open"""
         # Choose forex pair based on signal type and location
         if signal['type'] == 'Pentagon Pizza' or 'government' in signal.get('location', '').lower():
             # Government signals -> USD strength pairs
@@ -454,12 +454,12 @@ st.markdown("### 🎯 Educational Demo Platform for Black Swan Detection")
 
 # Disclaimer
 st.warning("⚠️ **EDUCATIONAL PURPOSE ONLY - NO REAL TRADING** ⚠️")
-st.info("🎮 **SIMULATED DATA:** This dashboard demonstrates alternative data concepts using simulated signals and demo trades.")
+st.info(" **SIMULATED DATA:** This dashboard demonstrates alternative data concepts using simulated signals and demo trades.")
 
 # Data Sources Explanation
 with st.expander("📊 **Data Sources & Realism**"):
     st.markdown("""
-    **🎮 SIMULATED (Educational Demo):**
+    **SIMULATED (Educational Demo):**
     - Pentagon Pizza signals: Realistic patterns but simulated restaurant activity
     - Traffic anomalies: Simulated traffic data with realistic business hour patterns  
     - Reddit sentiment: Simulated post analysis
@@ -469,7 +469,6 @@ with st.expander("📊 **Data Sources & Realism**"):
     
     **✅ REAL DATA:**
     - Market hours (CST timezone aware)
-    - **FIXED:** Whole dollar strikes only (no decimals like real SPY options)
     - Actual trading session status
     - Proper market open/closed logic
     - Forex market hours (24/5 Sunday 5 PM - Friday 5 PM CST)
@@ -733,7 +732,7 @@ if st.session_state.demo_trades:
     col1, col2 = st.columns(2)
     with col1:
         if any('PREP FOR MONDAY' in trade['status'] for trade in st.session_state.demo_trades[-5:]):
-            st.caption("📅 **PREP FOR MONDAY:** Options market closed - these would execute Monday at 8:30 AM CST")
+            st.caption("📅 **PREP FOR MONDAY:** Options market closed - the orders will be entered Monday at 8:30 AM CST")
         if any(int(trade.get('strike', 0)) == trade.get('strike', 0) for trade in st.session_state.demo_trades[-5:] if trade.get('asset_type') == 'OPTIONS'):
             st.caption("✅ **FIXED:** All option strikes are now whole dollars (no decimals)")
     with col2:
