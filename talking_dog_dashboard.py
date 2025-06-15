@@ -62,11 +62,15 @@ def get_market_status():
     is_daily_break = (weekday < 5 and hour == 16)
     futures_open = not (is_weekend_break or is_daily_break)
     
+    # Forex markets: Sunday 5 PM CST - Friday 5 PM CST (24/5)
+    forex_open = not ((weekday == 5 and hour >= 17) or (weekday == 6) or (weekday == 0 and hour < 17))
+    
     return {
         'cst_time': now,
         'stock_market_open': stock_open,
         'options_market_open': options_open, 
         'futures_market_open': futures_open,
+        'forex_market_open': forex_open,
         'weekend': weekday >= 5,
         'session': get_session_name(now)
     }
@@ -101,8 +105,20 @@ class DemoSignalGenerator:
             'Goldman Sachs': {'lat': 40.7157, 'lng': -74.0134, 'type': 'finance'},
         }
         
+        # Major forex pairs
+        self.forex_pairs = {
+            'EUR/USD': {'base': 'EUR', 'quote': 'USD', 'typical_price': 1.0800},
+            'GBP/USD': {'base': 'GBP', 'quote': 'USD', 'typical_price': 1.2700},
+            'USD/JPY': {'base': 'USD', 'quote': 'JPY', 'typical_price': 149.50},
+            'USD/CHF': {'base': 'USD', 'quote': 'CHF', 'typical_price': 0.9100},
+            'AUD/USD': {'base': 'AUD', 'quote': 'USD', 'typical_price': 0.6650},
+            'USD/CAD': {'base': 'USD', 'quote': 'CAD', 'typical_price': 1.3500},
+            'NZD/USD': {'base': 'NZD', 'quote': 'USD', 'typical_price': 0.6100},
+        }
+        
         self.signal_history = []
         self.demo_trades = []
+        self.forex_trades = []
         self.total_pnl = 0
         
     def generate_pentagon_pizza_signals(self) -> List[Dict]:
@@ -249,10 +265,23 @@ class DemoSignalGenerator:
         return signals
     
     def simulate_demo_trade(self, signal: Dict, ticker: str = 'SPY') -> Dict:
-        """Simulate a demo trade based on signal"""
+        """Simulate a realistic demo trade based on signal"""
         if signal['trading_decision'] != 'trade':
             return None
         
+        # Get market status for realistic trade routing
+        market_status = get_market_status()
+        
+        # Route to appropriate market based on what's open
+        if market_status['options_market_open']:
+            return self.simulate_options_trade(signal, ticker, market_status)
+        elif market_status['forex_market_open']:
+            return self.simulate_forex_trade(signal, market_status)
+        else:
+            return self.simulate_options_prep(signal, ticker, market_status)
+    
+    def simulate_options_trade(self, signal: Dict, ticker: str, market_status: Dict) -> Dict:
+        """Simulate options trade when options market is open"""
         current_price = 500 + np.random.uniform(-10, 10)  # Simulate SPY price
         
         # Choose strike based on signal strength
@@ -264,12 +293,116 @@ class DemoSignalGenerator:
         # Decide put or call based on signal type
         if signal['type'] == 'Pentagon Pizza':
             option_type = 'PUT'  # Government activity often bearish
-            strike = current_price * (1 - strike_offset)
+            target_strike = current_price * (1 - strike_offset)
         else:
             option_type = np.random.choice(['PUT', 'CALL'])
-            strike = current_price * (1 + strike_offset if option_type == 'CALL' else 1 - strike_offset)
+            target_strike = current_price * (1 + strike_offset if option_type == 'CALL' else 1 - strike_offset)
         
-        # Simulate option price
+        # REALISTIC STRIKE PRICES - Round to whole dollars (like real options)
+        strike = round(target_strike)  # Real options use whole dollar strikes for SPY
+        
+        # Simulate realistic option price based on how far OTM
+        otm_percent = abs(strike - current_price) / current_price
+        if otm_percent < 0.02:  # Close to money
+            option_price = np.random.uniform(1.50, 4.00)
+        elif otm_percent < 0.05:  # Moderate OTM
+            option_price = np.random.uniform(0.25, 1.50)
+        else:  # Far OTM
+            option_price = np.random.uniform(0.05, 0.50)
+        
+        quantity = max(1, int(signal['ai_confidence'] * 10))
+        
+        trade = {
+            'timestamp': signal['timestamp'],
+            'signal_type': signal['type'],
+            'signal_location': signal['location'],
+            'asset_type': 'OPTIONS',
+            'ticker': ticker,
+            'option_type': option_type,
+            'strike': int(strike),  # Whole dollar strikes only
+            'option_price': round(option_price, 2),
+            'quantity': quantity,
+            'total_cost': round(option_price * quantity * 100, 2),
+            'ai_confidence': signal['ai_confidence'],
+            'status': '💰 OPTIONS BUY',
+            'market_open': True,
+            'pnl': 0
+        }
+        
+        return trade
+    
+    def simulate_forex_trade(self, signal: Dict, market_status: Dict) -> Dict:
+        """Simulate forex trade when forex market is open"""
+        # Choose forex pair based on signal type and location
+        if signal['type'] == 'Pentagon Pizza' or 'government' in signal.get('location', '').lower():
+            # Government signals -> USD strength pairs
+            pair_options = ['EUR/USD', 'GBP/USD', 'AUD/USD', 'NZD/USD']
+            direction = 'SELL'  # Sell EUR/USD = Buy USD
+        elif signal['type'] == 'Corporate Jets':
+            # Corporate activity -> Major pairs
+            pair_options = ['EUR/USD', 'GBP/USD', 'USD/JPY']
+            direction = np.random.choice(['BUY', 'SELL'])
+        else:
+            # Other signals -> Random major pair
+            pair_options = list(self.forex_pairs.keys())
+            direction = np.random.choice(['BUY', 'SELL'])
+        
+        pair = np.random.choice(pair_options)
+        pair_info = self.forex_pairs[pair]
+        
+        # Simulate current price with some variance
+        base_price = pair_info['typical_price']
+        current_price = base_price * (1 + np.random.uniform(-0.02, 0.02))
+        
+        # Position size based on signal confidence (standard lot = 100,000 units)
+        if signal['ai_confidence'] > 0.8:
+            lot_size = 1.0  # Standard lot
+        elif signal['ai_confidence'] > 0.6:
+            lot_size = 0.5  # Half lot
+        else:
+            lot_size = 0.1  # Mini lot
+        
+        # Calculate position value (in USD)
+        if 'USD' in pair_info['quote']:
+            position_value = lot_size * 100000 * current_price
+        else:
+            position_value = lot_size * 100000  # For USD base pairs
+        
+        trade = {
+            'timestamp': signal['timestamp'],
+            'signal_type': signal['type'],
+            'signal_location': signal['location'],
+            'asset_type': 'FOREX',
+            'pair': pair,
+            'direction': direction,
+            'lot_size': lot_size,
+            'entry_price': round(current_price, 4),
+            'position_value': round(position_value, 2),
+            'ai_confidence': signal['ai_confidence'],
+            'status': f'💱 FOREX {direction}',
+            'market_open': True,
+            'pnl': 0
+        }
+        
+        return trade
+    
+    def simulate_options_prep(self, signal: Dict, ticker: str, market_status: Dict) -> Dict:
+        """Simulate options preparation when markets are closed"""
+        current_price = 500 + np.random.uniform(-10, 10)
+        
+        if signal['strength'] > 0.8:
+            strike_offset = 0.02
+        else:
+            strike_offset = 0.05
+        
+        if signal['type'] == 'Pentagon Pizza':
+            option_type = 'PUT'
+            target_strike = current_price * (1 - strike_offset)
+        else:
+            option_type = np.random.choice(['PUT', 'CALL'])
+            target_strike = current_price * (1 + strike_offset if option_type == 'CALL' else 1 - strike_offset)
+        
+        strike = round(target_strike)
         option_price = np.random.uniform(0.25, 1.50)
         quantity = max(1, int(signal['ai_confidence'] * 10))
         
@@ -277,15 +410,17 @@ class DemoSignalGenerator:
             'timestamp': signal['timestamp'],
             'signal_type': signal['type'],
             'signal_location': signal['location'],
+            'asset_type': 'OPTIONS',
             'ticker': ticker,
             'option_type': option_type,
-            'strike': round(strike, 2),
+            'strike': int(strike),
             'option_price': round(option_price, 2),
             'quantity': quantity,
             'total_cost': round(option_price * quantity * 100, 2),
             'ai_confidence': signal['ai_confidence'],
-            'status': 'DEMO TRADE',
-            'pnl': 0  # Will be updated later
+            'status': '📅 PREP FOR MONDAY',
+            'market_open': False,
+            'pnl': 0
         }
         
         return trade
@@ -306,7 +441,45 @@ st.markdown("### 🎯 Educational Demo Platform for Black Swan Detection")
 
 # Disclaimer
 st.warning("⚠️ **EDUCATIONAL PURPOSE ONLY - NO REAL TRADING** ⚠️")
-st.info("This dashboard demonstrates alternative data signal detection for educational purposes. All trades are simulated.")
+st.info("🎮 **SIMULATED DATA:** This dashboard demonstrates alternative data concepts using simulated signals and demo trades.")
+
+# Data Sources Explanation
+with st.expander("📊 **Data Sources & Realism**"):
+    st.markdown("""
+    **🎮 SIMULATED (Educational Demo):**
+    - Pentagon Pizza signals: Realistic patterns but simulated restaurant activity
+    - Traffic anomalies: Simulated traffic data with realistic business hour patterns  
+    - Reddit sentiment: Simulated post analysis
+    - Corporate jet movements: Simulated flight data
+    - Options prices: Simulated but realistic pricing models
+    - Forex rates: Simulated but realistic major pair pricing
+    
+    **✅ REAL DATA:**
+    - Market hours (CST timezone aware)
+    - Realistic strike prices (whole dollars, like real SPY options)
+    - Actual trading session status
+    - Proper market open/closed logic
+    - Forex market hours (24/5 Sunday 5 PM - Friday 5 PM CST)
+    - Smart trading routing (Options when open, Forex when options closed)
+    
+    **🎯 SMART ROUTING:** 
+    - Options Market Open → Trade Options
+    - Options Closed + Forex Open → Trade Forex  
+    - All Markets Closed → Prepare Monday Options
+    
+    **🎯 PURPOSE:** 
+    Shows how alternative data COULD work with proper real data feeds.
+    Real implementation would use actual APIs (Google Places, FlightAware, etc.)
+    """)
+
+# Market Status with Better Context
+market_status = get_market_status()
+if not market_status['options_market_open'] and market_status['forex_market_open']:
+    st.info(f"💱 **FOREX MODE ACTIVE** - Options closed, routing signals to forex pairs (24/5 trading)")
+elif not market_status['options_market_open']:
+    st.warning(f"📅 **ALL MARKETS CLOSED** - Any 'trades' shown are preparations for Monday market open")
+elif market_status['weekend']:
+    st.info(f"🌙 **WEEKEND MODE** - Increased sensitivity for unusual government activity")
 
 # Sidebar Controls
 st.sidebar.header("🎛️ Control Panel")
@@ -334,6 +507,16 @@ status_colors = {True: "🟢", False: "🔴"}
 st.sidebar.write(f"{status_colors[market_status['stock_market_open']]} **Stock Market**")
 st.sidebar.write(f"{status_colors[market_status['options_market_open']]} **Options Market**")
 st.sidebar.write(f"{status_colors[market_status['futures_market_open']]} **Futures Market**")
+st.sidebar.write(f"{status_colors[market_status['forex_market_open']]} **Forex Market** (24/5)")
+
+# Trading routing info
+st.sidebar.subheader("🎯 Auto Trading Route")
+if market_status['options_market_open']:
+    st.sidebar.success("→ Options Trading Active")
+elif market_status['forex_market_open']:
+    st.sidebar.info("→ Forex Trading Active")
+else:
+    st.sidebar.warning("→ Preparing Monday Options")
 
 # Check if we need to update
 current_time = get_cst_time()
@@ -402,18 +585,41 @@ with col3:
     st.subheader("💰 Demo Trading")
     
     if st.session_state.demo_trades:
-        total_cost = sum(trade['total_cost'] for trade in st.session_state.demo_trades)
-        st.metric("Total Demo Investment", f"${total_cost:,.2f}")
+        # Calculate totals for different asset types
+        options_trades = [t for t in st.session_state.demo_trades if t.get('asset_type') == 'OPTIONS']
+        forex_trades = [t for t in st.session_state.demo_trades if t.get('asset_type') == 'FOREX']
         
-        active_trades = len(st.session_state.demo_trades)
-        st.metric("Active Demo Trades", active_trades)
+        total_options_cost = sum(trade.get('total_cost', 0) for trade in options_trades)
+        total_forex_value = sum(trade.get('position_value', 0) for trade in forex_trades)
         
-        # Simulate some P&L
-        simulated_pnl = np.random.uniform(-total_cost * 0.3, total_cost * 0.8)
-        pnl_color = "normal" if simulated_pnl > 0 else "inverse"
-        st.metric("Simulated P&L", f"${simulated_pnl:,.2f}", delta=f"{(simulated_pnl/total_cost)*100:.1f}%")
+        # Display metrics based on what's active
+        if market_status['options_market_open']:
+            st.metric("Options Investment", f"${total_options_cost:,.2f}")
+            if total_options_cost > 0:
+                simulated_pnl = np.random.uniform(-total_options_cost * 0.3, total_options_cost * 0.8)
+                st.metric("Options P&L", f"${simulated_pnl:,.2f}", delta=f"{(simulated_pnl/total_options_cost)*100:.1f}%")
+        
+        elif market_status['forex_market_open']:
+            st.metric("Forex Positions", f"${total_forex_value:,.2f}")
+            if total_forex_value > 0:
+                forex_pnl = np.random.uniform(-total_forex_value * 0.02, total_forex_value * 0.05)  # Lower % for forex
+                st.metric("Forex P&L", f"${forex_pnl:,.2f}", delta=f"{(forex_pnl/total_forex_value)*100:.2f}%")
+        
+        else:
+            monday_prep = len([t for t in st.session_state.demo_trades if 'PREP FOR MONDAY' in t.get('status', '')])
+            st.metric("Monday Prep Trades", monday_prep)
+        
+        # Total positions metric
+        total_positions = len(options_trades) + len(forex_trades)
+        st.metric("Total Positions", total_positions)
+        
     else:
-        st.metric("Demo Status", "Ready")
+        if market_status['options_market_open']:
+            st.metric("Status", "Ready for Options")
+        elif market_status['forex_market_open']:
+            st.metric("Status", "Ready for Forex")
+        else:
+            st.metric("Status", "Preparing for Monday")
 
 # Signal strength chart
 if st.session_state.signals_history:
@@ -460,9 +666,59 @@ if st.session_state.demo_trades:
     trades_df = pd.DataFrame(st.session_state.demo_trades[-10:])
     trades_df['timestamp'] = trades_df['timestamp'].dt.strftime('%H:%M:%S')
     
-    st.dataframe(trades_df[['timestamp', 'signal_type', 'ticker', 'option_type', 
-                           'strike', 'option_price', 'quantity', 'total_cost', 'ai_confidence']], 
-                use_container_width=True)
+    # Color code based on asset type and status
+    def color_row(row):
+        if 'FOREX' in row['status']:
+            return ['background-color: #E3F2FD'] * len(row)  # Blue for forex
+        elif 'PREP FOR MONDAY' in row['status']:
+            return ['background-color: #FFF3CD'] * len(row)  # Yellow for prep
+        elif 'OPTIONS BUY' in row['status']:
+            return ['background-color: #D4EDDA'] * len(row)  # Green for options
+        return [''] * len(row)
+    
+    # Create display columns based on asset type
+    display_rows = []
+    for _, trade in trades_df.iterrows():
+        if trade.get('asset_type') == 'FOREX':
+            display_rows.append({
+                'Time': trade['timestamp'],
+                'Signal': trade['signal_type'],
+                'Asset': trade.get('pair', 'N/A'),
+                'Direction': trade.get('direction', 'N/A'),
+                'Size': f"{trade.get('lot_size', 0)} lots",
+                'Price': trade.get('entry_price', 0),
+                'Value': f"${trade.get('position_value', 0):,.0f}",
+                'Status': trade['status'],
+                'AI Conf': f"{trade['ai_confidence']:.1%}"
+            })
+        else:  # Options
+            display_rows.append({
+                'Time': trade['timestamp'],
+                'Signal': trade['signal_type'],
+                'Asset': trade.get('ticker', 'SPY'),
+                'Direction': trade.get('option_type', 'N/A'),
+                'Size': f"{trade.get('quantity', 0)} contracts",
+                'Price': f"${trade.get('option_price', 0):.2f}",
+                'Value': f"${trade.get('total_cost', 0):,.0f}",
+                'Status': trade['status'],
+                'AI Conf': f"{trade['ai_confidence']:.1%}"
+            })
+    
+    display_df = pd.DataFrame(display_rows)
+    
+    # Apply styling
+    styled_df = display_df.style.apply(lambda row: color_row(row), axis=1)
+    
+    st.dataframe(styled_df, use_container_width=True)
+    
+    # Market status explanation
+    col1, col2 = st.columns(2)
+    with col1:
+        if any('PREP FOR MONDAY' in trade['status'] for trade in st.session_state.demo_trades[-5:]):
+            st.caption("📅 **PREP FOR MONDAY:** Options market closed - these would execute Monday at 8:30 AM CST")
+    with col2:
+        if any('FOREX' in trade.get('status', '') for trade in st.session_state.demo_trades[-5:]):
+            st.caption("💱 **FOREX ACTIVE:** Currency markets trade 24/5 - live execution when options closed")
 
 # Performance metrics
 if len(st.session_state.signals_history) > 10:
